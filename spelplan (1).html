@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kalle Kaos Spelplan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&display=swap">
+<style>
+  :root{
+    --sky:#eaf5ff; --meadow:#d7ecc4; --meadowDeep:#bfe0a6;
+    --rim:#fffaf0; --ink:#1b2a47;
+    --font:"Baloo 2","Trebuchet MS",system-ui,sans-serif;
+  }
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--meadow);font-family:var(--font)}
+  svg{display:block;width:100vw;height:100vh}
+  text{font-family:var(--font)}
+  .num{font-weight:800;text-anchor:middle;dominant-baseline:central;fill:#fff;paint-order:stroke;stroke:rgba(0,0,0,.18);stroke-width:4px}
+  .sign{font-weight:800;text-anchor:middle;dominant-baseline:central;fill:#fff;letter-spacing:3px}
+  .pawnNum{font-weight:800;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+  .sway{animation:sway 3.2s ease-in-out infinite;transform-box:fill-box;transform-origin:0% 100%}
+  @keyframes sway{50%{transform:skewX(-6deg)}}
+  .glow{animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  #err{position:fixed;left:14px;bottom:12px;max-width:560px;font:600 15px/1.35 var(--font);color:#7a1426;background:#fff;padding:8px 12px;border-radius:10px;box-shadow:0 4px 14px rgba(27,42,71,.2)}
+  @media (prefers-reduced-motion:reduce){.sway,.glow{animation:none}}
+</style>
+</head>
+<body>
+<svg id="board" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-label="Spelplan">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e3f3e8"/><stop offset=".55" stop-color="#d4ecc6"/><stop offset="1" stop-color="#c3e2ad"/>
+    </linearGradient>
+    <radialGradient id="vig" cx=".5" cy=".5" r=".75">
+      <stop offset=".6" stop-color="#2c5a2a" stop-opacity="0"/><stop offset="1" stop-color="#2c5a2a" stop-opacity=".18"/>
+    </radialGradient>
+    <radialGradient id="island" cx=".45" cy=".35" r=".75">
+      <stop offset="0" stop-color="#8fd36f"/><stop offset="1" stop-color="#5aaa45"/>
+    </radialGradient>
+    <linearGradient id="dirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a6a46"/><stop offset="1" stop-color="#6b4f33"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe27a"/><stop offset="1" stop-color="#f2a900"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#1b3a1a" flood-opacity=".22"/>
+    </filter>
+    <filter id="pawnSh" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2.2" flood-color="#000" flood-opacity=".35"/>
+    </filter>
+    <pattern id="check" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="16" height="16" fill="#fff"/><rect width="8" height="8" fill="#1b2a47"/><rect x="8" y="8" width="8" height="8" fill="#1b2a47"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <g id="decoBack"></g>
+  <g id="road"></g>
+  <g id="islands"></g>
+  <g id="decoFront"></g>
+  <g id="pawns"></g>
+  <rect width="1920" height="1080" fill="url(#vig)" pointer-events="none"/>
+</svg>
+<div id="err" hidden></div>
+
+<script>
+/* ===== INSTÄLLNINGAR ===== */
+const SHEET_ID = "11EWAid7aCw_d4F-5t2yjWAEN9oQSyvXevTw6wNAp0Xw";
+const UPDATE_EVERY_SEC = 3;
+const TEAMS = 11, STEPS = 36;
+const TEAM_COLORS = ["#1f6fe5","#f57c1f","#1e9e4a","#e0283c","#8e44d6","#f2b705",
+                     "#12b3b8","#e8409a","#4b3fd9","#3aa8f0","#0b8a6a"];
+const DARK_TEXT = new Set([5]);
+
+/* ===== GRUNDVERKTYG ===== */
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function shade(hex, f){ // f<0 mörkare, f>0 ljusare
+  const n = parseInt(hex.slice(1),16); let r=n>>16, g=n>>8&255, b=n&255;
+  const t = f<0?0:255, p = Math.abs(f);
+  r = Math.round((t-r)*p+r); g = Math.round((t-g)*p+g); b = Math.round((t-b)*p+b);
+  return `rgb(${r},${g},${b})`;
+}
+let seed = 7; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+
+/* ===== VÄGEN ===== */
+const START = {x:170, y:858}, GOAL = {x:1770, y:205};
+const ROAD_W = 150;
+const D = "M 262 852 C 460 852 570 802 805 815 C 1040 828 1200 888 1450 860 " +
+          "C 1700 832 1772 700 1705 615 C 1648 545 1520 540 1350 545 " +
+          "C 1100 552 950 502 700 525 C 450 548 250 568 212 450 " +
+          "C 178 330 300 258 500 248 C 750 236 900 196 1150 214 C 1350 228 1500 256 1655 222";
+const guide = el("path",{d:D, fill:"none"}, $("road"));
+const LEN = guide.getTotalLength();
+const PAD_A = 8, PAD_B = 4;                      // lite luft i vägens ändar
+const SEG = (LEN - PAD_A - PAD_B) / STEPS;
+const P = s => guide.getPointAtLength(Math.max(0, Math.min(LEN, s)));
+function frame(s){                                // punkt + normal vid längd s
+  const a = P(s-1), b = P(s+1), dx = b.x-a.x, dy = b.y-a.y, l = Math.hypot(dx,dy)||1;
+  let nx = -dy/l, ny = dx/l; if (ny > 0 || (Math.abs(ny) < .2 && nx > 0)) { nx=-nx; ny=-ny; }
+  const p = P(s); return {x:p.x, y:p.y, nx, ny};
+}
+const TILE = [];                                  // TILE[k] = {x,y,nx,ny}, k=1..36
+for (let k=1; k<=STEPS; k++) TILE[k] = frame(PAD_A + (k-.5)*SEG);
+
+function drawRoad(){
+  const g = $("road");
+  el("path",{d:D, fill:"none", stroke:"#1b3a1a", "stroke-opacity":.12, "stroke-width":ROAD_W+44, "stroke-linecap":"round", transform:"translate(0 10)", style:"filter:blur(6px)"}, g);
+  el("path",{d:D, fill:"none", stroke:"#e9dfc7", "stroke-width":ROAD_W+30, "stroke-linecap":"round"}, g);
+  el("path",{d:D, fill:"none", stroke:"var(--rim)", "stroke-width":ROAD_W+20, "stroke-linecap":"round"}, g);
+  const hw = ROAD_W/2;
+  for (let k=1; k<=STEPS; k++){
+    const s0 = PAD_A + (k-1)*SEG, s1 = s0 + SEG, pts = [], N = 10;
+    for (let i=0;i<=N;i++){ const f = frame(s0 + (s1-s0)*i/N); pts.push([f.x+f.nx*hw, f.y+f.ny*hw]); }
+    for (let i=N;i>=0;i--){ const f = frame(s0 + (s1-s0)*i/N); pts.push([f.x-f.nx*hw, f.y-f.ny*hw]); }
+    const hue = (205 - (k-1)*(345/STEPS) + 360) % 360;
+    const last = k===STEPS;
+    const id = "tg"+k;
+    const t = TILE[k];
+    const lg = el("linearGradient",{id, gradientUnits:"userSpaceOnUse",
+      x1:t.x+t.nx*hw, y1:t.y+t.ny*hw, x2:t.x-t.nx*hw, y2:t.y-t.ny*hw}, $("board").querySelector("defs"));
+    el("stop",{offset:0, "stop-color": last?"#ffd84d":`hsl(${hue} 78% 62%)`}, lg);
+    el("stop",{offset:1, "stop-color": last?"#f0a400":`hsl(${hue} 70% 50%)`}, lg);
+    el("polygon",{points:pts.map(p=>p.join(",")).join(" "), fill:`url(#${id})`,
+      stroke:"var(--rim)", "stroke-width":4, "stroke-linejoin":"round"}, g);
+    const n = el("text",{x:t.x+t.nx*44, y:t.y+t.ny*44, class:"num", "font-size":34}, g);
+    n.textContent = k;
+  }
+}
+
+/* ===== ÖAR: START & MÅL ===== */
+function island(cx, cy, rx, ry, g){
+  el("ellipse",{cx, cy:cy+26, rx:rx+6, ry:ry+10, fill:"url(#dirt)", filter:"url(#soft)"}, g);
+  el("ellipse",{cx, cy, rx, ry, fill:"url(#island)"}, g);
+  el("ellipse",{cx:cx-rx*.25, cy:cy-ry*.35, rx:rx*.45, ry:ry*.22, fill:"#fff", opacity:.14}, g);
+}
+function signBoard(x, y, w, label, g, rot){
+  const s = el("g",{transform:`translate(${x} ${y}) rotate(${rot||0})`}, g);
+  el("rect",{x:-w/2+14, y:6, width:8, height:58, rx:3, fill:"#6b4f33"}, s);
+  el("rect",{x:w/2-22, y:6, width:8, height:58, rx:3, fill:"#6b4f33"}, s);
+  el("rect",{x:-w/2, y:-30, width:w, height:62, rx:12, fill:"#1b2a47", filter:"url(#soft)"}, s);
+  el("rect",{x:-w/2+5, y:-25, width:w-10, height:52, rx:9, fill:"none", stroke:"#fff", "stroke-opacity":.25, "stroke-width":2}, s);
+  el("text",{x:0, y:2, class:"sign", "font-size":34}, s).textContent = label;
+}
+function drawIslands(){
+  const g = $("islands");
+  island(START.x, START.y, 150, 112, g);
+  signBoard(START.x+10, START.y-178, 190, "START", g, -6);
+
+  island(GOAL.x, GOAL.y, 128, 98, g);
+  el("circle",{class:"glow", cx:GOAL.x, cy:GOAL.y, r:118, fill:"none", stroke:"#ffe27a", "stroke-width":6, opacity:.8}, g);
+  // flagga
+  const f = el("g",{transform:`translate(${GOAL.x+30} ${GOAL.y-170})`}, g);
+  el("rect",{x:-4, y:0, width:8, height:150, rx:4, fill:"#1b2a47"}, f);
+  el("circle",{cx:0, cy:-4, r:8, fill:"url(#gold)"}, f);
+  el("path",{class:"sway", d:"M4 6 C 40 -4 70 18 104 6 L 104 70 C 70 82 40 60 4 70 Z", fill:"url(#check)", stroke:"#1b2a47", "stroke-width":3}, f);
+  signBoard(GOAL.x-30, GOAL.y-6, 150, "MÅL", g, 4);
+  // solstrålar
+  for (let i=0;i<7;i++){
+    const a = (-150 + i*20) * Math.PI/180, r1 = 150, r2 = 178;
+    el("line",{x1:GOAL.x+Math.cos(a)*r1, y1:GOAL.y-40+Math.sin(a)*r1, x2:GOAL.x+Math.cos(a)*r2, y2:GOAL.y-40+Math.sin(a)*r2,
+      stroke:"#f5c518", "stroke-width":7, "stroke-linecap":"round", class:"glow", style:`animation-delay:${i*.15}s`}, g);
+  }
+}
+
+/* ===== DEKOR: TRÄD, BUSKAR, STENAR, GRÄS ===== */
+const ROAD_SAMPLES = []; for (let s=0;s<=LEN;s+=20){ const p=P(s); ROAD_SAMPLES.push([p.x,p.y]); }
+function free(x, y, pad){
+  for (const [px,py] of ROAD_SAMPLES) if (Math.hypot(px-x, py-y) < ROAD_W/2+pad) return false;
+  if (Math.hypot((x-START.x)/1.25, y-START.y) < 140+pad*.6) return false;
+  if (Math.hypot((x-GOAL.x)/1.2, y-GOAL.y+60) < 170+pad*.6) return false;
+  return x>30 && x<1890 && y>40 && y<1050;
+}
+function tree(x, y, s, g){
+  const t = el("g",{transform:`translate(${x} ${y}) scale(${s})`}, g);
+  el("ellipse",{cx:0, cy:4, rx:30, ry:9, fill:"#1b3a1a", opacity:.18}, t);
+  el("rect",{x:-5, y:-22, width:10, height:26, rx:3, fill:"#7a5a3a"}, t);
+  el("path",{d:"M0 -112 L 34 -46 L -34 -46 Z", fill:"#3f8f4a"}, t);
+  el("path",{d:"M0 -92 L 42 -18 L -42 -18 Z", fill:"#2f7a3d"}, t);
+  el("path",{d:"M0 -112 L 34 -46 L 8 -46 Z", fill:"#5aa95e", opacity:.6}, t);
+}
+function bush(x, y, s, g){
+  const b = el("g",{transform:`translate(${x} ${y}) scale(${s})`}, g);
+  el("ellipse",{cx:0, cy:6, rx:36, ry:9, fill:"#1b3a1a", opacity:.16}, b);
+  el("circle",{cx:-16, cy:-12, r:18, fill:"#4f9e4c"}, b);
+  el("circle",{cx:14, cy:-14, r:20, fill:"#58a955"}, b);
+  el("circle",{cx:0, cy:-26, r:20, fill:"#68b964"}, b);
+  el("circle",{cx:-6, cy:-32, r:7, fill:"#fff", opacity:.15}, b);
+}
+function rock(x, y, s, g){
+  const r = el("g",{transform:`translate(${x} ${y}) scale(${s})`}, g);
+  el("ellipse",{cx:0, cy:4, rx:34, ry:8, fill:"#1b3a1a", opacity:.16}, r);
+  el("path",{d:"M-30 2 C -32 -20 -12 -34 4 -32 C 22 -30 34 -14 30 2 Z", fill:"#9aa7b8"}, r);
+  el("path",{d:"M-16 -26 C -6 -32 10 -32 18 -24 C 6 -22 -6 -20 -16 -26 Z", fill:"#c4ceda"}, r);
+  el("path",{d:"M22 2 C 30 -8 40 -6 42 2 Z", fill:"#8794a6"}, r);
+}
+function tuft(x, y, g){
+  el("path",{d:`M${x-8} ${y} q2 -14 4 -16 M${x} ${y} q0 -18 1 -20 M${x+7} ${y} q-1 -12 4 -15`,
+    stroke:"#6fae55", "stroke-width":3, fill:"none", "stroke-linecap":"round"}, g);
+}
+function flower(x, y, g){
+  const c = ["#ffffff","#ffd84d","#ff8fb1","#b9a3ff"][Math.floor(rnd()*4)];
+  for (let i=0;i<5;i++){ const a=i*1.2566; el("circle",{cx:x+Math.cos(a)*4.5, cy:y+Math.sin(a)*4.5, r:3.6, fill:c}, g); }
+  el("circle",{cx:x, cy:y, r:2.6, fill:"#f2a900"}, g);
+}
+function drawDeco(){
+  const items = [];
+  const want = [["tree",34,70],["bush",22,46],["rock",10,44]];
+  for (const [kind, count, pad] of want){
+    let tries = 0, made = 0;
+    while (made < count && tries++ < 4000){
+      const x = 40 + rnd()*1840, y = 70 + rnd()*960;
+      if (!free(x, y, pad)) continue;
+      if (items.some(it => Math.hypot(it.x-x, it.y-y) < 70)) continue;
+      items.push({kind, x, y, s: .75 + rnd()*.5}); made++;
+    }
+  }
+  const back = $("decoBack");
+  for (let i=0;i<140;i++){ const x=30+rnd()*1860, y=60+rnd()*990; if (free(x,y,12)) tuft(x,y,back); }
+  for (let i=0;i<60;i++){ const x=30+rnd()*1860, y=60+rnd()*990; if (free(x,y,14)) flower(x,y,back); }
+  items.sort((a,b)=>a.y-b.y);
+  for (const it of items) ({tree, bush, rock})[it.kind](it.x, it.y, it.s, $("decoFront"));
+}
+
+/* ===== PJÄSER ===== */
+const pawns = [];
+function makePawns(){
+  const g = $("pawns");
+  for (let i=0;i<TEAMS;i++){
+    const c = TEAM_COLORS[i];
+    const outer = el("g",{}, g);
+    const inner = el("g",{filter:"url(#pawnSh)"}, outer);
+    const lgId = "pg"+i;
+    const lg = el("linearGradient",{id:lgId, x1:0, y1:0, x2:1, y2:0}, $("board").querySelector("defs"));
+    el("stop",{offset:0, "stop-color":shade(c,.25)}, lg);
+    el("stop",{offset:.55, "stop-color":c}, lg);
+    el("stop",{offset:1, "stop-color":shade(c,-.3)}, lg);
+    const crown = el("circle",{cx:0, cy:-30, r:40, fill:"#ffe27a", opacity:0, class:"glow"}, inner);
+    el("ellipse",{cx:0, cy:0, rx:22, ry:8, fill:shade(c,-.35)}, inner);
+    el("ellipse",{cx:0, cy:-3, rx:21, ry:7, fill:`url(#${lgId})`}, inner);
+    el("path",{d:"M-15 -5 C -12 -18 -8 -26 -9 -34 L 9 -34 C 8 -26 12 -18 15 -5 Z", fill:`url(#${lgId})`}, inner);
+    el("ellipse",{cx:0, cy:-34, rx:12, ry:4, fill:shade(c,-.2)}, inner);
+    el("circle",{cx:0, cy:-49, r:16, fill:`url(#${lgId})`, stroke:shade(c,-.35), "stroke-width":1.5}, inner);
+    el("circle",{cx:-5, cy:-55, r:4.5, fill:"#fff", opacity:.45}, inner);
+    const t = el("text",{x:0, y:-48, class:"pawnNum", "font-size":19, fill:DARK_TEXT.has(i)?"#1b2a47":"#fff"}, inner);
+    t.textContent = i+1;
+    pawns.push({outer, crown, pos:0, x:START.x, y:START.y, s:1});
+  }
+}
+
+function place(k){ return k===0 ? START : k===STEPS ? GOAL : TILE[k]; }
+function layout(n, k){
+  // returnerar platser relativt mitten + skala
+  const onIsland = k===0 || k===STEPS;
+  let cols, s, dx, dy;
+  if (onIsland){ cols = n<=4?2:n<=9?3:4; s = n<=4?1.05:.9; dx = 52; dy = 40; }
+  else if (n===1){ cols=1; s=1.15; dx=0; dy=0; }
+  else if (n===2){ cols=2; s=1; dx=40; dy=0; }
+  else if (n<=4){ cols=2; s=.85; dx=36; dy=30; }
+  else if (n<=6){ cols=3; s=.72; dx=31; dy=28; }
+  else { cols=4; s=.6; dx=26; dy=24; }
+  const rows = Math.ceil(n/cols), out = [];
+  for (let j=0;j<n;j++){
+    const r = Math.floor(j/cols), inRow = Math.min(cols, n-r*cols), c = j%cols;
+    out.push({x:(c-(inRow-1)/2)*dx, y:(r-(rows-1)/2)*dy, s});
+  }
+  return out;
+}
+function targetFor(positions){
+  const groups = {}, tgt = [];
+  positions.forEach((p,i)=>(groups[p] ||= []).push(i));
+  for (const p in groups){
+    const k = +p, c = place(k), L = layout(groups[p].length, k);
+    const off = (k===0||k===STEPS) ? {x:0,y:30} : {x:-c.nx*22, y:-c.ny*22+22}; // bort från siffran
+    groups[p].forEach((i,j)=> tgt[i] = {x:c.x+off.x+L[j].x, y:c.y+off.y+L[j].y, s:L[j].s});
+  }
+  return tgt;
+}
+function setPawn(p, x, y, s, hop){
+  p.outer.setAttribute("transform", `translate(${x.toFixed(1)} ${(y-hop).toFixed(1)}) scale(${s.toFixed(3)})`);
+}
+function zSort(){
+  [...pawns].sort((a,b)=>a.y-b.y).forEach(p => $("pawns").appendChild(p.outer));
+}
+
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let anims = [];
+function moveTo(positions){
+  const tgt = targetFor(positions);
+  anims = [];
+  pawns.forEach((p,i)=>{
+    const to = positions[i], from = p.pos, T = tgt[i];
+    p.crown.setAttribute("opacity", to===STEPS ? .55 : 0);
+    if (reduce || from===to){ anims.push({p, path:[{x:p.x,y:p.y,s:p.s},{...T}], hops:false}); }
+    else {
+      const dir = to>from?1:-1, path = [{x:p.x,y:p.y,s:p.s}];
+      for (let k=from+dir; k!==to; k+=dir){ const c=place(k); path.push({x:c.x, y:c.y+18, s:Math.min(p.s,T.s)+.1}); }
+      path.push({...T});
+      anims.push({p, path, hops:true});
+    }
+    p.pos = to;
+  });
+  const t0 = performance.now(), STEP_MS = 260;
+  function tick(now){
+    let running = false;
+    for (const a of anims){
+      const legs = a.path.length-1, dur = a.hops ? STEP_MS : 500;
+      let f = (now-t0)/dur; if (f < legs) running = true;
+      f = Math.min(f, legs);
+      const i = Math.min(Math.floor(f), legs-1), t = f - i, A = a.path[i], B = a.path[i+1];
+      const e = a.hops ? t : 1-Math.pow(1-t,3);
+      const x = A.x+(B.x-A.x)*e, y = A.y+(B.y-A.y)*e, s = A.s+(B.s-A.s)*e;
+      const hop = a.hops && f<legs ? Math.sin(Math.PI*t)*34 : 0;
+      a.p.x = x; a.p.y = y; a.p.s = s; setPawn(a.p, x, y, s, hop);
+    }
+    zSort();
+    if (running && !reduce) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+let lastKey = "";
+function render(positions){
+  const key = positions.join(",");
+  if (key === lastKey) return;
+  lastKey = key; moveTo(positions);
+}
+
+/* ===== LÄS ARKET (kolumn A = lag, kolumn B = steg 0–36) ===== */
+const errBox = $("err");
+function parse(resp){
+  const rows = (resp.table && resp.table.rows) || [];
+  const pos = [];
+  const str = x => (x===null || x===undefined) ? "" : String(x).trim();
+  for (const row of rows){
+    const c = row.c || [];
+    let a = str(c[0] && (c[0].f ?? c[0].v)), b = str(c[1] && (c[1].v ?? c[1].f));
+    if (!b){ const m = a.match(/^(\D*\d+)\s+(\d+)$/); if (m){ a = m[1]; b = m[2]; } }
+    if (!a && !b) continue;
+    if (!b && /^(lag|lagnamn|team|namn)$|steg/i.test(a)) continue;
+    const n = b ? Number(b.replace(",", ".")) : 0;
+    if (isNaN(n)) continue;
+    pos.push(Math.max(0, Math.min(STEPS, Math.round(n))));
+    if (pos.length === TEAMS) break;
+  }
+  while (pos.length < TEAMS) pos.push(0);
+  return pos;
+}
+
+const BASE = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?headers=0`;
+const HELP = "Kan inte läsa kalkylarket. Öppna filen i Chrome/Edge på datorn (inte i förhandsvisningen i Claude) och dela arket som 'Alla med länken – Läsare'.";
+function show(resp){
+  if (!resp || resp.status === "error"){
+    const e = resp && resp.errors && resp.errors[0];
+    throw new Error("Google: " + ((e && (e.detailed_message || e.message)) || "okänt fel"));
+  }
+  render(parse(resp)); errBox.hidden = true;
+}
+async function viaFetch(){
+  const r = await fetch(`${BASE}&tqx=out:json&_=${Date.now()}`, {cache:"no-store"});
+  const t = await r.text();
+  const i = t.indexOf("{"), j = t.lastIndexOf("}");
+  if (i < 0) throw new Error("ej JSON");
+  return JSON.parse(t.slice(i, j+1));
+}
+function viaScript(){
+  return new Promise((ok, fail) => {
+    const cb = "kk_" + Date.now(), s = document.createElement("script");
+    const end = () => { delete window[cb]; s.remove(); clearTimeout(to); };
+    const to = setTimeout(() => { end(); fail(new Error("timeout")); }, 8000);
+    window[cb] = resp => { end(); ok(resp); };
+    s.onerror = () => { end(); fail(new Error("script")); };
+    s.src = `${BASE}&tqx=out:json;responseHandler:${cb}&_=${Date.now()}`;
+    document.head.appendChild(s);
+  });
+}
+let busy = false, mode = "fetch";
+async function load(){
+  if (busy) return; busy = true;
+  try {
+    let resp;
+    if (mode === "fetch"){
+      try { resp = await viaFetch(); }
+      catch(e){ mode = "script"; resp = await viaScript(); }
+    } else resp = await viaScript();
+    show(resp);
+  } catch(e){
+    errBox.hidden = false;
+    errBox.textContent = e.message.startsWith("Google:") ? e.message + " – kontrollera delningen av arket." : HELP;
+    mode = "fetch";
+  } finally { busy = false; }
+}
+
+/* ===== START ===== */
+drawDeco(); drawRoad(); drawIslands(); makePawns();
+render(new Array(TEAMS).fill(0));
+load();
+setInterval(load, UPDATE_EVERY_SEC*1000);
+</script>
+</body>
+</html>
